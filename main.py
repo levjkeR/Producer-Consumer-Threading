@@ -1,4 +1,6 @@
 import threading
+import queue
+
 import random
 import time
 
@@ -18,63 +20,47 @@ import time
 """
 
 
-class Queue:
-    def __init__(self, queue=None):
-        self.queue = queue
-
-    def push(self, element):
-        self.queue.append(element)
-
-    def pop(self):
-        if not len(self.queue):
-            return None
-        return self.queue.pop(0)
-
-    def size(self):
-        return len(self.queue)
-
-
-queue = Queue(queue=list(range(200)))
-
-
-def get_randomint():
-    randomized = random.randint(1, 100)
-    return randomized
-
-
-class Producer(threading.Thread):
-    def __init__(self, number):
-        threading.Thread.__init__(self, name=f"Worker {number}")
-        self.number = number
-
-    def run(self):
-        while True:
-            print(queue.size())
-            if queue.size() < 100:
-                queue.push(get_randomint())
-            else:
+def produce(queue, event):
+    while not event.is_set():
+        if queue.qsize() <= 80:
+            item = random.randint(1, 100)
+            queue.put(item)
+        else:
+            while not event.is_set() and queue.qsize() > 80:
                 time.sleep(1)
 
 
-class Consumer(threading.Thread):
-    def __init__(self, number):
-        threading.Thread.__init__(self, name=f"Consumer {number}")
-        self.number = number
-
-    def run(self):
-        while True:
-            if queue.size() != 0:
-                queue.pop()
-            else:
-                print(queue.size(), 'sleep', queue.__dict__)
-                time.sleep(5)
+def consume(queue, event):
+    while not event.is_set():
+        if not queue.empty():
+            item = queue.get()
+            time.sleep(0)
 
 
 if __name__ == '__main__':
-    producers = [Producer(1), Producer(2), Producer(3)]
-    consumers = [Consumer(1), Consumer(2)]
+    queue = queue.Queue()
+    for i in range(100):
+        queue.put(i)
 
-    for producer in producers:
-        producer.start()
-    for consumer in consumers:
-        consumer.start()
+    reduce_stop = threading.Event()
+    produce_stop = threading.Event()
+    workers = [
+        threading.Thread(target=produce, args=(queue, reduce_stop,)),
+        threading.Thread(target=produce, args=(queue, reduce_stop,)),
+        threading.Thread(target=produce, args=(queue, reduce_stop,)),
+        threading.Thread(target=consume, args=(queue, produce_stop,)),
+        threading.Thread(target=consume, args=(queue, produce_stop,))
+    ]
+    for w in workers:
+        w.start()
+
+    while True:
+        if input('Press q for stop produce: ') == 'q':
+            reduce_stop.set()
+            while not queue.empty():
+                pass
+            produce_stop.set()
+            break
+
+    for w in workers:
+        w.join()
